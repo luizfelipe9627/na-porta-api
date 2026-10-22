@@ -1,0 +1,68 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: na-porta-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: na-porta-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public"
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+      INITIAL_USER_NAME: ${INITIAL_USER_NAME}
+      INITIAL_USER_EMAIL: ${INITIAL_USER_EMAIL}
+      INITIAL_USER_PASSWORD: ${INITIAL_USER_PASSWORD}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: na-porta-studio
+    restart: unless-stopped
+    command: [ "npx", "prisma", "studio", "--port", "5555", "--browser", "none" ]
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?schema=public"
+    ports:
+      - "127.0.0.1:5555:5556"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  studio-proxy:
+    image: alpine/socat
+    container_name: na-porta-studio-proxy
+    restart: unless-stopped
+    network_mode: "service:studio"
+    depends_on:
+      - studio
+    command:
+      - "TCP-LISTEN:5556,bind=0.0.0.0,reuseaddr,fork"
+      - "TCP:127.0.0.1:5555"
+
+volumes:
+  postgres_data:
